@@ -1,0 +1,415 @@
+---
+title: "Homework 1"
+author: "Sri Vidya Battula"
+format:
+  html:
+    toc: true
+    toc-location: left
+    self-contained: true
+---
+
+Professional wrestling, while not everyone's cup of tea, is big business. What started as a carnival act has turned into a global entertainment industry. Netflix recently announced a long-term streaming partnership with the biggest North American wrestling company, WWE -- this deal is reportedly worth \$5 billion. Like any large entity, WWE is not without competition, drama, and scandal. 
+
+## Step 1
+
+In the `calls` folder, you'll find 3 text files -- these are transcripts from recent quarterly earnings calls. Read those files in, with appropriate column names for ticker, quarter, and year columns. Perform any data cleaning that you find necessary. 
+
+```{r}
+library(dplyr)
+library(tidytext)
+
+my_files <- function(file_location, ticker, quarter, year, sep = "\n") {
+  file_content <- readLines(file_location)
+  file_content <- c(file_content, "")
+ 
+  data.frame(value = file_content, stringsAsFactors = FALSE) %>%
+    filter(nchar(trimws(value)) > 0) %>%
+    mutate(ticker = ticker,
+           quarter = quarter,
+           year = year) %>%
+    setNames(c("Company Participants", "ticker", "quarter", "year"))
+}
+
+wwe_1 <- my_files("E:/University of Notre Dame/Unstructured Data Analytics/calls/wwe_q1_2023.txt", "WWE", "Q1", 2023)
+wwe_1 <- wwe_1[-1, ]
+wwe_2 <- my_files("E:/University of Notre Dame/Unstructured Data Analytics/calls/wwe_q2_2023.txt", "WWE", "Q2", 2023)
+wwe_2 <- wwe_2[-1, ]
+wwe_3 <- my_files("E:/University of Notre Dame/Unstructured Data Analytics/calls/edr_q3_2023.txt", "WWE", "Q3", 2023)
+wwe_3 <- wwe_3[-1, ]
+
+wwe_calls <- rbind(wwe_1, wwe_2, wwe_3)
+
+wwe_calls <- wwe_calls[!grepl("Conference Call Participants|Operator", wwe_calls$`Company Participants`), ]
+```
+
+
+
+## Step 2
+
+Use the AlphaVantage api to get daily stock prices for WWE and related tickers going back 5 years. You cannot use any AlphaVantage packages. Tell me about the general trend that you are seeing. Has recent news impacted the stock price?
+
+
+```{r}
+library(httr)
+library(jsonlite) 
+library(glue)
+library(purrr)
+library(dplyr)
+
+av_key <- "3AL91Z13QGZK16J6" 
+
+fetch_stock_data <- function(symbol, api_key) { 
+  av_link <- glue("https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&outputsize=full&apikey={api_key}")
+  av_response <- GET(av_link)
+  av_data <- content(av_response, "parsed", simplifyVector = TRUE)
+  
+  av_series <- av_data$`Time Series (Daily)`
+  
+  av_dates <- names(av_series)
+  av_output <- map_df(av_dates, function(x) {
+    row <- as.data.frame(t(av_series[[x]]))
+    row$Date <- x
+    return(row)
+  })
+  
+  names(av_output) <- c("Open", "High", "Low", "Close", "Volume", "Date")
+  av_output <- av_output %>% select(Date, Open, High, Low, Close, Volume)
+  
+  return(av_output)
+}
+
+wwe_data <- fetch_stock_data("WWE", av_key)
+TKO_data <- fetch_stock_data("TKO", av_key)
+
+wwe_tko <- arrange(rbind(wwe_data, TKO_data), desc(Date))
+
+
+wwe_tko_5years <- wwe_tko %>% 
+  filter(Date >= Sys.Date() - 365*5)
+
+#Just to see if there is any recent news that has impacted the stock price in specific
+
+wwe_tko_from_aug_2023 <- wwe_tko %>% 
+  filter(Date >= "2023-08-01")
+
+wwe_tko_from_jan_2023 <- wwe_tko %>% 
+  filter(Date >= "2023-01-01")
+
+
+wwe_tko_5years$Date <- as.Date(wwe_tko_5years$Date, format = "%Y-%m-%d")
+wwe_tko_5years$Open <- as.numeric(wwe_tko_5years$Open)
+wwe_tko_5years$High <- as.character(wwe_tko_5years$High)
+wwe_tko_5years$Low <- as.numeric(wwe_tko_5years$Low)
+wwe_tko_5years$Close <- as.numeric(wwe_tko_5years$Close)
+wwe_tko_5years$Volume <- as.numeric(wwe_tko_5years$Volume)
+
+
+library(ggplot2)
+
+
+ggplot(wwe_tko_5years, aes(x = Date, y = Close)) +
+  geom_line(color = "gold") +
+  labs(title = "WWE Stock Price Over Time",
+       x = "Date",
+       y = "Closing price") +
+  theme_minimal() 
+
+wwe_tko_from_aug_2023$Date <- as.Date(wwe_tko_from_aug_2023$Date, format = "%Y-%m-%d") 
+wwe_tko_from_aug_2023$Close <- as.numeric(wwe_tko_from_aug_2023$Close)
+
+wwe_tko_from_jan_2023$Date <- as.Date(wwe_tko_from_jan_2023$Date, format = "%Y-%m-%d") 
+wwe_tko_from_jan_2023$Close <- as.numeric(wwe_tko_from_jan_2023$Close)
+
+
+ggplot(wwe_tko_from_aug_2023, aes(x = Date, y = Close)) +
+  geom_line(color = "red") +
+  labs(title = "WWE Stock Price From before and after merge",
+       x = "Date",
+       y = "Closing price") +
+  theme_minimal()
+
+#wanted to check if trend is same before the merger and after the merger
+
+ggplot(wwe_tko_from_jan_2023, aes(x = Date, y = Close)) +
+  geom_line(color = "brown") +
+  labs(title = "WWE Stock Price Over Recent Year",
+       x = "Date",
+       y = "Closing price") +
+  theme_minimal()
+```
+Answer: 
+
+The overall pattern in the stock's behavior appears to be quadratic, yet there has been a noticeable decline in its price following the company's merger in 2023. In the span of a year from January 2023 to January 2024, the stock experienced a significant surge at one point, although the prices at the beginning and end of this period were nearly equivalent. After a sharp downturn in 2019, the stock has been on an upward trajectory since 2020. Recent developments, particularly the merger, seem to have adversely influenced the stock's performance, leading to a downward trend in its price post-merger.
+
+## Step 3
+
+Just like every other nerdy hobby, professional wrestling draws dedicated fans. Wrestling fans often go to cagematch.net to leave reviews for matches, shows, and wrestlers. The following link contains the top 100 matches on cagematch: https://www.cagematch.net/?id=111&view=statistics
+
+Please note that if you are using R, you will need to wrap the link the the `url` function before reading it.
+
+
+Scrapping the top 100 wrestling matches table from cagematch:
+
+```{r}
+cagematch <- url("https://www.cagematch.net/?id=111&view=statistics")
+
+library(xml2)
+library(rvest)
+
+strat_read <- read_html(cagematch)
+
+
+strat_read_t <- strat_read %>% 
+  html_elements("table")
+
+rows <- xml_find_all(strat_read_t, "//tr")  
+
+data <- lapply(rows, function(row) {
+  cells <- xml_find_all(row, ".//td")  
+  cell_values <- sapply(cells, xml_text)  
+  return(cell_values)
+})
+
+cagematch_table <- do.call(rbind, data)
+
+
+colnames(cagematch_table) <- as.character(unlist(cagematch_table[1, ]))
+cagematch_table <- cagematch_table[-1, ]
+
+cagematch_table <- as.data.frame(cagematch_table, stringsAsFactors = FALSE)
+
+cagematch_table$Date <- as.Date(cagematch_table$Date, format="%d.%m.%Y")
+cagematch_table$Rating <- as.numeric(cagematch_table$Rating)
+cagematch_table$Votes <- as.numeric(gsub(",", "", cagematch_table$Votes))  
+
+```
+
+Counting stars : 
+
+```{r}
+library(stringr)
+
+count_stars <- function(stars) {
+  stars_count <- str_count(stars, fixed("*"))
+  
+  stars_ex <- str_extract(stars, "\\d/\\d")
+  decimal_values <- c("1/4" = 0.25, "1/2" = 0.50, "3/4" = 0.75)
+  decimal_value <- ifelse(!is.na(stars_ex), decimal_values[stars_ex], 0)
+  
+  return(stars_count + decimal_value)
+}
+
+cagematch_table$WON <- sapply(cagematch_table$WON, count_stars)
+
+```
+
+Retrieving titles from promotion image:
+
+```{r}
+library(rvest)
+
+cagematch <- url("https://www.cagematch.net/?id=111&view=statistics")
+cage_read <- read_html(cagematch) 
+
+promotion <- cage_read %>%
+  html_elements(".ImagePromotionLogoMini") %>%
+  html_attr("title")
+
+promotion <- data.frame(title = promotion)
+
+cagematch_table$Promotion <- promotion$title
+
+```
+
+
+* What is the correlation between WON ratings and cagematch ratings?
+
+```{r}
+
+correlation <- cor(cagematch_table$WON, cagematch_table$Rating)
+correlation
+
+```
+Answer: 
+
+The correlation between the WON ratings and cagematch ratings is 0.32, indicating a positive relationship between the two variables. It concludes that if WON ratings are high, cagematch ratings are also high or vice versa.
+
+** Which wrestler has the most matches in the top 100?
+
+```{r}
+matches <- strsplit(cagematch_table$`Match fixture`, " vs. ")
+cagematch_table$Wrestler1 <- sapply(matches, `[`, 1)
+cagematch_table$Wrestler2 <- sapply(matches, `[`, 2)
+
+wrestler_count <- c(Wrestler1 = cagematch_table$Wrestler1, Wrestler2 = cagematch_table$Wrestler2)
+
+wrestler_counts <- table(wrestler_count)
+
+most_frequent_wrestler <- names(which.max(wrestler_counts))
+
+max_count <- max(wrestler_counts)
+
+most_frequent_wrestler_name <- names(wrestler_counts[wrestler_counts == max_count])
+
+result_name_matches <- c(Wrestler = most_frequent_wrestler_name, Count = max_count)
+
+
+result_name_matches
+
+```
+
+Answer: 
+
+"Kazuchika Okada" has the most matches in Top 100 with the highest count of "16" matches. 
+
+*** Which promotion has the most matches in the top 100? 
+
+```{r}
+check <- (table(cagematch_table$Promotion))
+
+sorted_promotion_table <- sort(check, decreasing = TRUE)
+sorted_promotion_table[1]
+
+```
+
+Answer: 
+
+New Japan Pro Wrestling promotion has the most matches in the top 100 with the count of 38.
+
+
+**** What is each promotion's average WON rating?
+
+```{r}
+
+library(dplyr)
+
+promotion__avg_won_rating <- cagematch_table %>%
+  group_by(Promotion) %>%
+  summarise(AVG_WON_Rating = mean(WON)) %>% 
+  arrange(desc(AVG_WON_Rating))
+
+promotion__avg_won_rating
+```
+
+
+***** Select any single match and get the comments and ratings for that match into a data frame.
+
+```{r}
+
+link_match <- url("https://www.cagematch.net/?id=111&nr=2510&page=99")
+
+
+comments <- read_html(link_match) %>%
+  html_elements(".CommentContents") %>% 
+  html_text()
+
+extract_numbers <- function(x) {
+  as.numeric(gsub("^\\[(\\d+\\.?\\d*).*", "\\1", x))
+}
+
+extract_text <- function(x) {
+  gsub("^\\[\\d+\\.?\\d*\\]\\s*\"(.*)\"", "\\1", x)
+}
+
+Ratings <- lapply(comments, extract_numbers)
+Comments <- lapply(comments, extract_text)
+
+results <- data.frame(Comments = unlist(Comments), Ratings = unlist(Ratings),  stringsAsFactors = FALSE)
+
+
+```
+
+
+## Step 4
+
+You can't have matches without wrestlers. The following link contains the top 100 wrestlers, according to cagematch: https://www.cagematch.net/?id=2&view=statistics
+
+
+Extracting the Match Statistics from each player link:
+
+```{r}
+library(rvest)
+library(dplyr)
+library(purrr)
+
+link_match_statistics <- url("https://www.cagematch.net/?id=2&view=statistics")
+match_links <- read_html(link_match_statistics)%>%
+  html_elements("a[href*='?id=2&nr=']") %>%
+  html_attr("href") %>%
+  paste0("https://www.cagematch.net/", .)
+
+wrestler_links  <- gsub("&gimmick=.*", "&page=22", match_links)
+
+
+
+scrape_wrestler_data <- function(link) {
+  page <- read_html(url(link))
+  wrestler_name <- page %>% html_element("h1.TextHeader") %>% html_text(trim = TRUE)
+  matches_count <- page %>% html_element(".InformationBoxTitle:contains('Total number of matches') + .InformationBoxContents") %>% html_text(trim = TRUE)
+  wins_count <- page %>% html_element(".InformationBoxTitle:contains('Total number of wins') + .InformationBoxContents") %>% html_text(trim = TRUE)
+  loss_count <- page %>% html_element(".InformationBoxTitle:contains('Total number of losses') + .InformationBoxContents") %>% html_text(trim = TRUE)
+  
+  tibble(WrestlerName = wrestler_name, MatchesCount = matches_count, WinCount = wins_count, LossCount = loss_count)
+}
+
+result_table <- map_df(wrestler_links, scrape_wrestler_data)
+```
+
+*** Of the top 100, who has wrestled the most matches?
+
+```{r}
+
+result_table$MatchesCount <- as.numeric(gsub("[^0-9]", "", result_table$MatchesCount))
+most_matches <- which.max(result_table$MatchesCount)
+highest_matches_wrestler <- result_table$WrestlerName[most_matches]
+highest_matches_wrestler
+
+```
+
+Answer: Ric Flair has wrestled the most matches in the top 100.
+
+
+***** Of the top 100, which wrestler has the best win/loss?
+
+```{r}
+
+result_table$WinCountNumber <- as.numeric(gsub(" .*", "", result_table$WinCount))
+result_table$LossCountNumber <- as.numeric(gsub(" .*", "", result_table$LossCount))
+
+
+result_table$WinLossRatio <- with(result_table, ifelse(LossCountNumber > 0, WinCountNumber / LossCountNumber, NA))
+
+best_winloss_wrestler <- result_table %>%
+  filter(!is.na(WinLossRatio)) %>% 
+  arrange(desc(WinLossRatio)) %>%
+  slice(1)
+
+best_winloss_wrestler
+
+```
+Answer: 
+
+Lou Thesz stands out among the top 100 wrestlers as having the highest win to loss record, with the ratio of 9.6.
+
+## Step 5
+
+With all of this work out of the way, we can start getting down to strategy.
+
+First, what talent should WWE pursue? 
+
+ • I would recommend Lou Thesz, who holds the highest win-to-loss record among the top 100 wrestlers. This strategic move for WWE would involve acquiring a wrestler with a proven track record of success. From a viewer's perspective, people are naturally drawn to individuals who win more matches, making Lou Thesz an enticing figure to watch. While he may not win every match, his impressive win-to-loss ratio would generate anticipation among fans for his future bouts. If he losses a match, most people will eagerly wait for the next matches to see if he wins or not. This strategy also presents a valuable marketing opportunity for WWE to increase viewership. 
+
+Second, reconcile what you found in steps 3 and 4 with Netflix's relationship with WWE. Use the data from the following page to help make your case: https://wrestlenomics.com/tv-ratings/
+
+ • The primary demographic for WWE's viewership is the 18-49 age group, making it crucial for WWE to target this segment effectively. Currently, viewership is split across two channels, with Fox experiencing its peak viewership on Fridays and the USA Network on Mondays. To maintain and expand its audience base, WWE must prioritize viewer retention. While a partnership with Netflix may seem appealing, it could potentially detract from viewership on Fox and the USA Network.
+
+ • Given that WWE Smackdown and Raw consistently outperform WWE NXT in terms of viewership, WWE should concentrate its efforts on these flagship shows to sustain and grow its audience. Moreover, there's a positive correlation between ratings from WON (Wrestling Observer Newsletter) and cagematch, indicating that focusing on acquiring wrestlers with high ratings in both categories can mutually reinforce each other and attract new viewers.
+
+
+
+Third, do you have any further recommendations for WWE?
+
+
+• I would recommend WWE to stage matches more frequently featuring Lou Thesz against Kazuchika Okada and Lou Thesz against Ric Flair, given their high success rates. This would strategically benefit WWE, as these wrestlers are among the strongest and most skilled competitors, piquing viewers' interest in closely contested matches between them as they are stronger and most competent players and the viewers will be interested in seeing neck to neck matches between them. 
+
+• Additionally, WWE should prioritize recruiting wrestlers from promotions such as New Japan Pro Wrestling, All Elite Wrestling, and All Japan Pro Wrestling, considering they have the highest number of matches in the top 100 and boast the highest average ratings. This strategic approach would enable WWE to acquire wrestlers with a proven track record of success, thereby serving as a catalyst for increasing viewership.
